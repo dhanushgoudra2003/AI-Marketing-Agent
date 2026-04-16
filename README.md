@@ -156,9 +156,4 @@ Output:
 * 🧠 Better ranking of campaigns
 * ☁️ Cloud deployment
 
----
 
-
-## 📜 License
-
-MIT License
