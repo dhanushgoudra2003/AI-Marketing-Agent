@@ -1,39 +1,164 @@
+# 🚀 AI Marketing Intelligence Agent
 
-# AI Crew for Marketing Strategy
-## Introduction
-This project demonstrates the use of the CrewAI framework to automate the creation of a marketing strategy. CrewAI orchestrates autonomous AI agents, enabling them to collaborate and execute complex tasks efficiently.
+An AI-powered multi-agent system that automatically generates **data-driven marketing strategies, campaign ideas, and growth plans** using LLMs and real-time insights.
 
-By [@joaomdmoura](https://x.com/joaomdmoura)
+---
 
-- [CrewAI Framework](#crewai-framework)
-- [Running the script](#running-the-script)
-- [Details & Explanation](#details--explanation)
-- [Contributing](#contributing)
-- [Support and Contact](#support-and-contact)
-- [License](#license)
+## 🧠 Overview
 
-## CrewAI Framework
-CrewAI is designed to facilitate the collaboration of role-playing AI agents. In this example, these agents work together to create a comprehensive marketing strategy and develop compelling marketing content.
+This project leverages **CrewAI agents + LLMs (Ollama - Llama3)** to simulate a real marketing team:
 
-## Running the Script
-It uses GPT-4o by default so you should have access to that to run it.
+* 📊 Market Analyst → Research & competitor analysis
+* 🎯 Marketing Strategist → Strategy formulation
+* 🚀 Growth Hacker → Growth plan & experiments
+* ✍️ Content Creator → Campaign ideas & copies
 
-***Disclaimer:** This will use gpt-4o unless you change it to use a different model, and by doing so it may incur in different costs.*
+The system produces a **complete marketing intelligence report + PDF output**.
 
-- **Configure Environment**: Copy `.env.example` and set up the environment variables for [OpenAI](https://platform.openai.com/api-keys) and other tools as needed, like [Serper](serper.dev).
-- **Install Dependencies**: Run `poetry lock && poetry install`.
-- **Customize**: Modify `src/marketing_posts/main.py` to add custom inputs for your agents and tasks.
-- **Customize Further**: Check `src/marketing_posts/config/agents.yaml` to update your agents and `src/marketing_posts/config/tasks.yaml` to update your tasks.
-- **Execute the Script**: Run `poetry run marketing_posts` and input your project details.
+---
 
-## Details & Explanation
-- **Running the Script**: Execute `poetry run marketing_posts`. The script will leverage the CrewAI framework to generate a detailed marketing strategy.
-- **Key Components**:
-  - `src/marketing_posts/main.py`: Main script file.
-  - `src/marketing_posts/crew.py`: Main crew file where agents and tasks come together, and the main logic is executed.
-  - `src/marketing_posts/config/agents.yaml`: Configuration file for defining agents.
-  - `src/marketing_posts/config/tasks.yaml`: Configuration file for defining tasks.
-  - `src/marketing_posts/tools`: Contains tool classes used by the agents.
+## ✨ Features
 
-## License
-This project is released under the MIT License.
+* 🔍 Market & competitor analysis
+* 🎯 Target audience understanding
+* 📈 Marketing strategy generation
+* 🚀 90-day growth plan
+* 💡 Campaign idea generation
+* ✍️ Marketing copy creation
+* 📄 Automated PDF report generation
+* ⚡ Multi-agent workflow using CrewAI
+
+---
+
+## 🏗️ Project Structure
+
+```
+AI-Marketing-Agent/
+│
+├── src/
+│   └── marketing_posts/
+│       ├── crew.py          # Agent + workflow logic
+│       ├── main.py          # Entry point
+│       ├── config/
+│       │   ├── agents.yaml
+│       │   ├── tasks.yaml
+│
+├── README.md
+├── .gitignore
+├── pyproject.toml
+├── .env.example
+```
+
+---
+
+## ⚙️ Tech Stack
+
+* Python
+* CrewAI
+* Ollama (Llama3)
+* Serper API (web search)
+* ReportLab (PDF generation)
+
+---
+
+## 🚀 How to Run Locally
+
+### 1. Clone the repo
+
+```
+git clone https://github.com/YOUR_USERNAME/AI-Marketing-Agent.git
+cd AI-Marketing-Agent
+```
+
+---
+
+### 2. Setup environment
+
+```
+python -m venv venv
+venv\Scripts\activate   # Windows
+```
+
+---
+
+### 3. Install dependencies
+
+```
+pip install -r requirements.txt
+```
+
+---
+
+### 4. Setup environment variables
+
+Create `.env` file:
+
+```
+SERPER_API_KEY=your_api_key_here
+```
+
+---
+
+### 5. Start Ollama
+
+```
+ollama serve
+```
+
+(Ensure `llama3` model is installed)
+
+---
+
+### 6. Run the project
+
+```
+python -m marketing_posts.main
+```
+
+---
+
+## 📄 Output
+
+The system generates:
+
+* 📊 Marketing strategy report
+* 💡 Campaign ideas
+* ✍️ Ad copies
+* 📈 Growth roadmap
+* 📄 Exported PDF report
+
+---
+
+## 🎯 Example Use Case
+
+Input:
+
+```
+Domain: aitool.com  
+Product: AI-powered coding assistant
+```
+
+Output:
+
+* Market insights
+* Competitor analysis
+* Growth strategy
+* Campaign ideas
+* Marketing copies
+
+---
+
+## 🔥 Future Improvements
+
+* 🌐 Web UI (Streamlit / React)
+* 📊 Dashboard for insights
+* 📡 Live data integrations
+* 🧠 Better ranking of campaigns
+* ☁️ Cloud deployment
+
+---
+
+
+## 📜 License
+
+MIT License
