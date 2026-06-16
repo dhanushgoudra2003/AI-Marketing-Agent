@@ -13,6 +13,12 @@ research_task:
     Use internet search results and extract useful insights instead of generic
     information.
 
+    Use these pre-collected real-time research sources as primary evidence:
+    {research_sources}
+
+    When you use a fact from these sources, include the matching source number
+    like [1] or [2].
+
   expected_output: >
     A detailed research report including:
     - Company overview
@@ -20,6 +26,7 @@ research_task:
     - Market trends
     - Competitor landscape
     - Key opportunities in the market
+    - Numbered citations for sourced claims
 
 
 project_understanding_task:
@@ -140,8 +147,15 @@ final_report_task:
     Requirements:
     - Avoid generic marketing advice.
     - Provide insights derived from research.
+    - Include source citation numbers like [1] next to factual claims.
     - Clearly structure the report with headings.
     - Keep the report professional and concise.
+    - Use Markdown headings for every section.
+    - In the Competitor Analysis section, list each competitor as:
+      Competitor Name: strength, weakness, and opportunity.
+    - In the 90-Day Growth Plan section, split recommendations into
+      days 1-30, days 31-60, and days 61-90.
+    - Include channel-specific campaign ideas and practical KPIs.
 
   expected_output: >
     A complete AI marketing intelligence report summarizing all

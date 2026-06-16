@@ -1,414 +1,674 @@
 #!/usr/bin/env python
+import json
+import os
+import re
 import sys
-from marketing_posts.crew import MarketingPostsCrew
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+from xml.sax.saxutils import escape
 
+from dotenv import load_dotenv
+from marketing_posts.crew import MarketingPostsCrew
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
     PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
     Table,
     TableStyle,
-    Image
 )
 
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-
-import matplotlib.pyplot as plt
+load_dotenv()
 
 
-# ==============================
-# STYLES
-# ==============================
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_REPORTS_DIR = PROJECT_ROOT / "reports"
+
 
 styles = getSampleStyleSheet()
 
 title_style = ParagraphStyle(
     "TitleStyle",
     parent=styles["Title"],
-    fontSize=36,
-    leading=42,
+    fontSize=30,
+    leading=36,
     textColor=colors.HexColor("#1f4e79"),
     alignment=1,
-    spaceAfter=40
+    spaceAfter=18,
+)
+
+subtitle_style = ParagraphStyle(
+    "SubtitleStyle",
+    parent=styles["BodyText"],
+    fontSize=13,
+    leading=18,
+    textColor=colors.HexColor("#555555"),
+    alignment=1,
+    spaceAfter=28,
 )
 
 heading_style = ParagraphStyle(
     "HeadingStyle",
     parent=styles["Heading2"],
-    fontSize=22,
+    fontSize=18,
     textColor=colors.HexColor("#1f4e79"),
-    spaceBefore=20,
-    spaceAfter=10
+    spaceBefore=16,
+    spaceAfter=8,
 )
 
 body_style = ParagraphStyle(
     "BodyStyle",
     parent=styles["BodyText"],
-    fontSize=12,
-    leading=18
+    fontSize=10.5,
+    leading=15,
+)
+
+small_style = ParagraphStyle(
+    "SmallStyle",
+    parent=styles["BodyText"],
+    fontSize=8.5,
+    leading=12,
+    textColor=colors.HexColor("#666666"),
+)
+
+bullet_style = ParagraphStyle(
+    "BulletStyle",
+    parent=body_style,
+    leftIndent=15,
+    firstLineIndent=-10,
+    spaceAfter=4,
 )
 
 
-# ==============================
-# DIVIDER LINE
-# ==============================
+def format_markdown_for_pdf(line: str, default_style: ParagraphStyle = body_style, b_style: ParagraphStyle = bullet_style) -> Paragraph:
+    line_str = line.strip()
+    is_bullet = False
+    
+    # Check for lists (bullet or numbered)
+    bullet_match = re.match(r"^[-*+]\s+(.*)$", line_str)
+    number_match = re.match(r"^(\d+[\).\s]+)(.*)$", line_str)
+    
+    if bullet_match:
+        is_bullet = True
+        content = bullet_match.group(1)
+        prefix = "&bull; "
+    elif number_match:
+        is_bullet = True
+        content = number_match.group(2)
+        prefix = number_match.group(1)
+    else:
+        content = line_str
+        prefix = ""
+    
+    # Escape XML special chars
+    html_content = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    
+    # Convert bold: **text** -> <b>text</b>
+    html_content = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", html_content)
+    # Convert italic: *text* -> <i>text</i>
+    html_content = re.sub(r"\*(.*?)\*", r"<i>\1</i>", html_content)
+    
+    full_text = f"{prefix}{html_content}"
+    style = b_style if is_bullet else default_style
+    return Paragraph(full_text, style)
+
+
+def build_callout_box(paragraphs: List[Paragraph], bg_color=colors.HexColor("#f0f8ff"), border_color=colors.HexColor("#1f4e79")) -> List:
+    flowables = []
+    for p in paragraphs:
+        table = Table([[p]], colWidths=[6.8 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), bg_color),
+                    ("LINELEFT", (0, 0), (0, -1), 4, border_color),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ]
+            )
+        )
+        flowables.append(table)
+        flowables.append(Spacer(1, 4))
+    return flowables
+
+
+@dataclass
+class ReportArtifacts:
+    output_dir: str
+    pdf_path: str
+    markdown_path: str
+    json_path: str
+
+
+@dataclass
+class SourceCitation:
+    title: str
+    link: str
+    snippet: str
+    retrieved_at: str
+
+
+@dataclass
+class ReportResult:
+    company_domain: str
+    project_description: str
+    model_name: str
+    generated_at: str
+    report_text: str
+    sections: Dict[str, List[str]]
+    competitors: List[str]
+    citations: List[SourceCitation]
+    artifacts: ReportArtifacts
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.lower()).strip("-")
+    return slug[:60] or "marketing-report"
+
 
 def divider():
-    t = Table([[""]], colWidths=[500])
-    t.setStyle(TableStyle([
-        ("LINEBELOW",(0,0),(-1,-1),1,colors.HexColor("#cccccc"))
-    ]))
-    return t
+    line = Table([[""]], colWidths=[7.0 * inch])
+    line.setStyle(
+        TableStyle(
+            [("LINEBELOW", (0, 0), (-1, -1), 0.8, colors.HexColor("#cccccc"))]
+        )
+    )
+    return line
 
-
-# ==============================
-# HEADER + FOOTER
-# ==============================
 
 def page_design(canvas, doc):
-
-    canvas.setFont("Helvetica-Bold",9)
-
+    canvas.setFont("Helvetica-Bold", 9)
     canvas.setFillColor(colors.HexColor("#1f4e79"))
-    canvas.drawString(40,750,"AI Marketing Intelligence Report")
-
+    canvas.drawString(40, 750, "AI Marketing Intelligence Report")
     canvas.setFillColor(colors.grey)
+    canvas.drawRightString(550, 20, f"Page {canvas.getPageNumber()}")
+    canvas.drawString(40, 20, "Generated by AI Multi-Agent Marketing System")
 
-    page_num = canvas.getPageNumber()
 
-    canvas.drawRightString(550,20,f"Page {page_num}")
+def clean_line(line: str) -> str:
+    line = line.strip()
+    line = re.sub(r"^[-*]\s+", "", line)
+    line = re.sub(r"^\d+[\).\s]+", "", line)
+    line = line.replace("**", "")
+    return line.strip()
 
-    canvas.drawString(
-        40,
-        20,
-        "Generated by AI Multi-Agent Marketing System"
+
+def pdf_text(value: str) -> str:
+    return escape(str(value))
+
+
+def fetch_research_citations(company_domain: str, project_description: str) -> List[SourceCitation]:
+    serper_api_key = os.getenv("SERPER_API_KEY")
+    if not serper_api_key:
+        return []
+
+    query = (
+        f"{company_domain} {project_description} market trends competitors "
+        "target audience marketing strategy"
+    )
+    payload = json.dumps({"q": query, "num": 8}).encode("utf-8")
+    request = Request(
+        "https://google.serper.dev/search",
+        data=payload,
+        headers={
+            "X-API-KEY": serper_api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
     )
 
+    retrieved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# ==============================
-# EXTRACT COMPETITORS
-# ==============================
+    try:
+        with urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except URLError as exc:
+        raise RuntimeError(f"Serper search failed while collecting citations: {exc}") from exc
 
-def extract_market_insights(text):
-
-    competitors = []
-    keywords = ["Copilot","ChatGPT","Cursor","Codeium","Tabnine"]
-
-    for k in keywords:
-        if k.lower() in text.lower():
-            competitors.append(k)
-
-    if not competitors:
-        competitors = ["GitHub Copilot","Cursor","Codeium"]
-
-    return list(set(competitors))
-
-
-# ==============================
-# CHART
-# ==============================
-
-def create_chart(competitors):
-
-    popularity = [80 - i*10 for i in range(len(competitors))]
-
-    plt.figure(figsize=(8,4))
-
-    bars = plt.bar(
-        competitors,
-        popularity,
-        color="#1f4e79"
-    )
-
-    plt.title("AI Coding Assistant Market Presence", fontsize=14)
-
-    plt.ylabel("Popularity Score")
-
-    for bar in bars:
-
-        height = bar.get_height()
-
-        plt.text(
-            bar.get_x()+bar.get_width()/2,
-            height+1,
-            str(height),
-            ha="center"
+    citations = []
+    for result in data.get("organic", [])[:8]:
+        link = result.get("link", "").strip()
+        title = result.get("title", "").strip()
+        if not link or not title:
+            continue
+        citations.append(
+            SourceCitation(
+                title=title,
+                link=link,
+                snippet=result.get("snippet", "").strip(),
+                retrieved_at=retrieved_at,
+            )
         )
 
-    plt.grid(axis="y",linestyle="--",alpha=0.4)
-
-    plt.tight_layout()
-
-    plt.savefig("competitor_chart.png")
-
-    plt.close()
+    return citations
 
 
-# ==============================
-# CLEAN AI OUTPUT
-# ==============================
-
-def clean_ai_output(result):
+def format_citations_for_prompt(citations: List[SourceCitation]) -> str:
+    if not citations:
+        return "No external citations were collected."
 
     lines = []
+    for index, citation in enumerate(citations, start=1):
+        lines.append(
+            "\n".join(
+                [
+                    f"[{index}] {citation.title}",
+                    f"URL: {citation.link}",
+                    f"Snippet: {citation.snippet}",
+                    f"Retrieved: {citation.retrieved_at}",
+                ]
+            )
+        )
+    return "\n\n".join(lines)
 
-    for line in result.split("\n"):
 
-        line = line.strip()
+def parse_report_sections(report_text: str) -> Dict[str, List[str]]:
+    sections: Dict[str, List[str]] = {}
+    current_heading = "Executive Summary"
 
-        if not line or line.startswith("Here is"):
+    for raw_line in report_text.splitlines():
+        line = raw_line.strip()
+        if not line:
             continue
 
-        # Remove markdown formatting
-        line = line.replace("**","")
-        line = line.replace("###","")
-        line = line.replace("##","")
-        line = line.replace("#","")
-
-        lines.append(line)
-
-    return lines
-
-
-# ==============================
-# GENERATE PDF
-# ==============================
-
-def generate_pdf(result,domain,description):
-
-    competitors = extract_market_insights(result)
-
-    create_chart(competitors)
-
-    elements = []
-
-    # COVER PAGE
-
-    elements.append(Paragraph("AI Marketing", title_style))
-    elements.append(Paragraph("Intelligence Report", title_style))
-    elements.append(Spacer(1,30))
-
-    elements.append(
-        Paragraph(
-            f"<b>Company:</b> {domain}",
-            body_style
+        heading_match = re.match(r"^(?:#{1,4}\s*)?(?:\d+[\).]\s*)?(.+?)(?:\s*:)?$", line)
+        looks_like_heading = (
+            line.startswith("#")
+            or re.match(r"^\d+[\).]\s+[A-Z]", line) is not None
+            or (len(line) <= 80 and line.endswith(":"))
         )
-    )
 
-    elements.append(
-        Paragraph(
-            f"<b>Product:</b> {description}",
-            body_style
-        )
-    )
+        if looks_like_heading and heading_match:
+            possible_heading = clean_line(heading_match.group(1).rstrip(":"))
+            if len(possible_heading.split()) <= 8:
+                current_heading = possible_heading
+                sections.setdefault(current_heading, [])
+                continue
 
-    elements.append(Spacer(1,60))
+        sections.setdefault(current_heading, []).append(line)
 
-    elements.append(
-        Paragraph(
-            "<font color='#777777'>Generated by AI Multi-Agent Marketing System</font>",
-            body_style
-        )
-    )
-
-    elements.append(PageBreak())
+    return {key: [item for item in values if item] for key, values in sections.items() if values}
 
 
-    # EXECUTIVE SUMMARY
-
-    elements.append(Paragraph("Executive Summary", heading_style))
-    elements.append(divider())
-
-    elements.append(
-        Paragraph(
-            "This report was generated using an AI multi-agent system "
-            "that performs automated research, competitor analysis "
-            "and marketing strategy planning.",
-            body_style
-        )
-    )
+def find_section(sections: Dict[str, List[str]], keyword: str) -> List[str]:
+    keyword = keyword.lower()
+    for heading, lines in sections.items():
+        if keyword in heading.lower():
+            return lines
+    return []
 
 
-    # MARKET INTELLIGENCE
+def extract_competitors(report_text: str, sections: Dict[str, List[str]]) -> List[str]:
+    source_lines = find_section(sections, "competitor") or report_text.splitlines()
+    competitors: List[str] = []
 
-    elements.append(Paragraph("Market Intelligence", heading_style))
-    elements.append(divider())
+    for line in source_lines:
+        cleaned = clean_line(line)
+        if not cleaned:
+            continue
 
-    elements.append(
-        Paragraph(
-            "AI developer tools are transforming the software industry. "
-            "Organizations increasingly rely on AI assistants to "
-            "accelerate development cycles and improve productivity.",
-            body_style
-        )
-    )
-
-
-    # COMPETITOR TABLE
-
-    elements.append(Paragraph("Competitor Landscape", heading_style))
-    elements.append(divider())
-
-    data = [["Competitor","Category"]]
-
-    for comp in competitors:
-        data.append([comp,"AI Coding Assistant"])
-
-    table = Table(data,colWidths=[250,200])
-
-    table.setStyle(
-        TableStyle([
-            ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1f4e79")),
-            ("TEXTCOLOR",(0,0),(-1,0),colors.white),
-
-            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-            ("FONTSIZE",(0,0),(-1,0),12),
-
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),
-             [colors.whitesmoke, colors.lightgrey]),
-
-            ("GRID",(0,0),(-1,-1),0.5,colors.grey),
-            ("ALIGN",(0,0),(-1,-1),"CENTER")
-        ])
-    )
-
-    elements.append(table)
-
-
-    # CHART
-
-    elements.append(Paragraph("Market Comparison", heading_style))
-    elements.append(divider())
-
-    elements.append(
-        Image(
-            "competitor_chart.png",
-            width=440,
-            height=240
-        )
-    )
-
-
-    # TARGET AUDIENCE
-
-    elements.append(Paragraph("Target Audience", heading_style))
-    elements.append(divider())
-
-    elements.append(
-        Paragraph(
-            "Primary users include developers, startups, engineering teams "
-            "and technology companies looking to improve development "
-            "productivity using AI coding assistants.",
-            body_style
-        )
-    )
-
-
-    # MARKETING STRATEGY
-
-    elements.append(Paragraph("Marketing Strategy", heading_style))
-    elements.append(divider())
-
-    elements.append(
-        Paragraph(
-            "Recommended marketing channels include developer communities "
-            "such as GitHub, StackOverflow, Hacker News, Reddit and "
-            "technical blogs.",
-            body_style
-        )
-    )
-
-    elements.append(PageBreak())
-
-
-    # CAMPAIGN IDEAS
-
-    elements.append(Paragraph("AI Generated Campaign Ideas", heading_style))
-    elements.append(divider())
-
-    clean_lines = clean_ai_output(result)
-
-    for line in clean_lines:
-
-        # Make Month titles bold
-        if line.lower().startswith("month"):
-            elements.append(
-                Paragraph(f"<b>{line}</b>", body_style)
-            )
+        if ":" in cleaned:
+            candidate = cleaned.split(":", 1)[0]
+        elif " - " in cleaned:
+            candidate = cleaned.split(" - ", 1)[0]
         else:
-            elements.append(
-                Paragraph(line, body_style)
-            )
+            candidate = cleaned
 
-        elements.append(Spacer(1,6))
+        candidate = re.sub(r"\(.*?\)", "", candidate).strip()
+        words = candidate.split()
+
+        if 1 <= len(words) <= 5 and any(char.isalpha() for char in candidate):
+            ignored = {
+                "competitor analysis",
+                "strength",
+                "weakness",
+                "market opportunity",
+                "top competitors",
+            }
+            if candidate.lower() not in ignored:
+                competitors.append(candidate)
+
+    unique = []
+    for competitor in competitors:
+        normalized = competitor.lower()
+        if normalized not in {item.lower() for item in unique}:
+            unique.append(competitor)
+
+    return unique[:8] or ["Primary Competitor", "Emerging Competitor", "Indirect Competitor"]
 
 
-    # FINAL INSIGHTS
+def build_table(rows: List[List[str]], widths: List[int]) -> Table:
+    table = Table(rows, colWidths=widths)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e79")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#eeeeee")]),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    return table
 
-    elements.append(PageBreak())
 
-    elements.append(Paragraph("Strategic Insights", heading_style))
-    elements.append(divider())
+def render_section_content(section_name: str, lines: List[str], elements: List) -> None:
+    is_rec_section = "recommendation" in section_name.lower()
+    is_growth_plan = "growth plan" in section_name.lower() or "roadmap" in section_name.lower()
 
-    insights = [
-        "AI coding assistants are one of the fastest growing developer tools.",
-        "GitHub Copilot currently dominates the AI coding assistant market.",
-        "Developer communities are the most effective marketing channel.",
-        "AI productivity tools will expand rapidly in enterprise development."
+    if is_rec_section:
+        rec_paragraphs = []
+        for line in lines[:18]:
+            if line.strip():
+                rec_paragraphs.append(format_markdown_for_pdf(line))
+        if rec_paragraphs:
+            elements.extend(build_callout_box(rec_paragraphs))
+            elements.append(Spacer(1, 10))
+
+    elif is_growth_plan:
+        phases = []
+        current_phase_title = None
+        current_phase_body = []
+
+        for line in lines[:25]:
+            if not line.strip():
+                continue
+            phase_match = re.search(r"(Days\s+\d+\s*-\s*\d+)", line, re.IGNORECASE)
+            if phase_match:
+                if current_phase_title or current_phase_body:
+                    phases.append((current_phase_title or "Initial Phase", current_phase_body))
+                title_text = re.sub(r"^[-*+\s]+|[\*#]", "", line).strip()
+                current_phase_title = title_text
+                current_phase_body = []
+            else:
+                if current_phase_title:
+                    current_phase_body.append(line)
+                else:
+                    current_phase_body.append(line)
+
+        if current_phase_title or current_phase_body:
+            phases.append((current_phase_title or "Action Plan", current_phase_body))
+
+        if phases:
+            for title, phase_lines in phases:
+                # Render header as a small non-wrapping block
+                title_p = Paragraph(f"<b>{title}</b>", ParagraphStyle("PhaseTitle", parent=body_style, textColor=colors.HexColor("#1f4e79"), fontSize=11))
+                header_table = Table([[title_p]], colWidths=[6.8 * inch])
+                header_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f1f3f5")),
+                            ("LINELEFT", (0, 0), (0, -1), 4, colors.HexColor("#1f4e79")),
+                            ("TOPPADDING", (0, 0), (-1, -1), 4),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                        ]
+                    )
+                )
+                elements.append(header_table)
+                elements.append(Spacer(1, 6))
+
+                # Render bullets as normal flowable paragraphs to allow clean page breaks
+                for pl in phase_lines:
+                    if pl.strip():
+                        indented_bullet_style = ParagraphStyle(
+                            "PhaseBullet",
+                            parent=bullet_style,
+                            leftIndent=25,
+                        )
+                        elements.append(format_markdown_for_pdf(pl, b_style=indented_bullet_style))
+                elements.append(Spacer(1, 10))
+        else:
+            for line in lines[:18]:
+                if line.strip():
+                    elements.append(format_markdown_for_pdf(line))
+                    elements.append(Spacer(1, 5))
+    else:
+        for line in lines[:18]:
+            if line.strip():
+                elements.append(format_markdown_for_pdf(line))
+                elements.append(Spacer(1, 5))
+
+
+def generate_pdf(result: ReportResult) -> None:
+    artifacts = result.artifacts
+    pdf_path = Path(artifacts.pdf_path)
+
+    elements = [
+        Paragraph("AI Marketing Intelligence Report", title_style),
+        Paragraph(pdf_text(result.company_domain), subtitle_style),
+        Paragraph(f"<b>Product:</b> {pdf_text(result.project_description)}", body_style),
+        PageBreak(),
     ]
 
-    for i in insights:
+    priority_sections = [
+        "Executive Summary",
+        "Market Insights",
+        "Competitor Analysis",
+        "Target Audience Personas",
+        "SEO Keyword Opportunities",
+        "Recommended Marketing Channels",
+        "90-Day Growth Plan",
+        "Campaign Ideas",
+        "Actionable Marketing Recommendations",
+    ]
 
-        elements.append(
-            Paragraph(f"<font color='#1f4e79'><b>• {i}</b></font>",body_style)
-        )
+    rendered = set()
+    for section_name in priority_sections:
+        lines = find_section(result.sections, section_name) or result.sections.get(section_name, [])
+        if not lines:
+            continue
+        rendered.add(section_name.lower())
+        elements.append(Paragraph(pdf_text(section_name), heading_style))
+        elements.append(divider())
+        render_section_content(section_name, lines, elements)
 
-        elements.append(Spacer(1,10))
+    remaining_sections = [
+        (heading, lines)
+        for heading, lines in result.sections.items()
+        if heading.lower() not in rendered
+    ]
+
+    for heading, lines in remaining_sections[:6]:
+        elements.append(Paragraph(pdf_text(heading), heading_style))
+        elements.append(divider())
+        render_section_content(heading, lines, elements)
 
 
-    doc = SimpleDocTemplate(
-        "marketing_report.pdf",
-        pagesize=letter
+
+    if result.citations:
+        elements.append(PageBreak())
+        elements.append(Paragraph("Research Sources", heading_style))
+        elements.append(divider())
+        for index, citation in enumerate(result.citations, start=1):
+            elements.append(
+                Paragraph(
+                    f"<b>[{index}] {pdf_text(citation.title)}</b>",
+                    body_style,
+                )
+            )
+            elements.append(Paragraph(pdf_text(citation.link), small_style))
+            if citation.snippet:
+                elements.append(Paragraph(pdf_text(citation.snippet), body_style))
+            elements.append(Paragraph(f"Retrieved: {pdf_text(citation.retrieved_at)}", small_style))
+            elements.append(Spacer(1, 8))
+
+    doc = SimpleDocTemplate(str(pdf_path), pagesize=letter, rightMargin=40, leftMargin=40)
+    doc.build(elements, onFirstPage=page_design, onLaterPages=page_design)
+
+
+def save_artifacts(report: ReportResult) -> None:
+    artifacts = report.artifacts
+    Path(artifacts.markdown_path).write_text(report.report_text, encoding="utf-8")
+    Path(artifacts.json_path).write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
+
+
+def validate_environment() -> None:
+    model_name = os.getenv("OPENAI_MODEL_NAME", os.getenv("MODEL_NAME", "ollama/llama3.1"))
+    serper_api_key = os.getenv("SERPER_API_KEY")
+
+    if not serper_api_key:
+        raise RuntimeError("SERPER_API_KEY is missing. Add it to your .env file before running research.")
+
+    if model_name.startswith("ollama/"):
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+        try:
+            urlopen(f"{base_url}/api/tags", timeout=3)
+        except URLError as exc:
+            raise RuntimeError(
+                f"Ollama is not reachable at {base_url}. Start Ollama and make sure the model is installed."
+            ) from exc
+
+
+def generate_marketing_report(
+    company_domain: str,
+    project_description: str,
+    reports_dir: Path | str = DEFAULT_REPORTS_DIR,
+) -> ReportResult:
+    company_domain = company_domain.strip()
+    project_description = project_description.strip()
+
+    if not company_domain or not project_description:
+        raise ValueError("Company domain and project description are required.")
+
+    validate_environment()
+    citations = fetch_research_citations(company_domain, project_description)
+
+    inputs = {
+        "customer_domain": company_domain,
+        "project_description": project_description,
+        "research_sources": format_citations_for_prompt(citations),
+    }
+
+    crew = MarketingPostsCrew().crew()
+    crew_result = crew.kickoff(inputs=inputs)
+    report_text = str(crew_result)
+
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    run_name = f"{slugify(company_domain)}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    output_dir = Path(reports_dir) / run_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    sections = parse_report_sections(report_text)
+
+    critical_sections = {
+        "Executive Summary": [1, 0],
+        "Market Insights": [0],
+        "Competitor Analysis": [3, 0],
+        "Target Audience Personas": [1],
+        "SEO Keyword Opportunities": [3],
+        "Recommended Marketing Channels": [3, 2],
+        "90-Day Growth Plan": [3],
+        "Campaign Ideas": [4],
+        "Actionable Marketing Recommendations": [2]
+    }
+
+    fallback_triggered = False
+    if hasattr(crew_result, "tasks_output") and len(crew_result.tasks_output) >= 6:
+        for sec_name, preferred_task_indices in critical_sections.items():
+            exists = False
+            for heading in sections.keys():
+                if sec_name.lower() in heading.lower() or heading.lower() in sec_name.lower():
+                    exists = True
+                    break
+            if not exists:
+                harvested = False
+                for task_idx in preferred_task_indices:
+                    if task_idx < len(crew_result.tasks_output):
+                        task_out = crew_result.tasks_output[task_idx]
+                        task_sections = parse_report_sections(task_out.raw)
+                        for heading, lines in task_sections.items():
+                            if sec_name.lower() in heading.lower() or heading.lower() in sec_name.lower():
+                                sections[sec_name] = lines
+                                harvested = True
+                                fallback_triggered = True
+                                break
+                        if harvested:
+                            break
+                # If still not harvested, take the primary task's raw output as a block
+                if not harvested and preferred_task_indices:
+                    primary_idx = preferred_task_indices[0]
+                    if primary_idx < len(crew_result.tasks_output):
+                        raw_text = crew_result.tasks_output[primary_idx].raw
+                        sections[sec_name] = [l.strip() for l in raw_text.splitlines() if l.strip()]
+                        fallback_triggered = True
+
+    if fallback_triggered:
+        recompiled = []
+        for heading, lines in sections.items():
+            recompiled.append(f"### {heading}\n")
+            recompiled.append("\n".join(lines))
+            recompiled.append("\n")
+        report_text = "\n".join(recompiled)
+
+    competitors = extract_competitors(report_text, sections)
+    pdf_path = output_dir / "marketing_report.pdf"
+    markdown_path = output_dir / "report.md"
+    json_path = output_dir / "report_data.json"
+
+    result = ReportResult(
+        company_domain=company_domain,
+        project_description=project_description,
+        model_name=os.getenv("OPENAI_MODEL_NAME", os.getenv("MODEL_NAME", "ollama/llama3.1")),
+        generated_at=generated_at,
+        report_text=report_text,
+        sections=sections,
+        competitors=competitors,
+        citations=citations,
+        artifacts=ReportArtifacts(
+            output_dir=str(output_dir),
+            pdf_path=str(pdf_path),
+            markdown_path=str(markdown_path),
+            json_path=str(json_path),
+        ),
     )
 
-    doc.build(
-        elements,
-        onLaterPages=page_design
-    )
+    save_artifacts(result)
+    generate_pdf(result)
+    return result
 
-    print("\nAdvanced marketing intelligence report generated: marketing_report.pdf")
-
-
-# ==============================
-# RUN
-# ==============================
 
 def run():
-
     print("===== AI MARKETING STRATEGY GENERATOR =====")
-
     domain = input("Enter company domain: ")
     description = input("Describe the project/product: ")
 
-    inputs = {
-        "customer_domain": domain,
-        "project_description": description
-    }
-
     print("\n===== STARTING CREW =====\n")
 
-    crew = MarketingPostsCrew().crew()
-
-    result = crew.kickoff(inputs=inputs)
+    try:
+        result = generate_marketing_report(domain, description)
+    except Exception as exc:
+        print(f"\nError: {exc}")
+        sys.exit(1)
 
     print("\n===== FINAL RESULT =====\n")
+    print(result.report_text)
+    print("\n===== FILES GENERATED =====")
+    print(f"Folder: {result.artifacts.output_dir}")
+    print(f"PDF: {result.artifacts.pdf_path}")
+    print(f"Markdown: {result.artifacts.markdown_path}")
+    print(f"JSON: {result.artifacts.json_path}")
+    print(f"Citations: {len(result.citations)} sources")
 
-    print(result)
 
-    generate_pdf(str(result),domain,description)
+def train():
+    print("Training is not configured for this project yet. Use `marketing_posts` to generate reports.")
 
 
 if __name__ == "__main__":

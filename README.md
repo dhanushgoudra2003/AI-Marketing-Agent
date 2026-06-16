@@ -1,159 +1,96 @@
-# 🚀 AI Marketing Intelligence Agent
+# AI Marketing Strategy Generator
 
-An AI-powered multi-agent system that automatically generates **data-driven marketing strategies, campaign ideas, and growth plans** using LLMs and real-time insights.
+This project uses CrewAI agents to research a company/product and generate a practical marketing intelligence report. It can be used from the terminal or through a small Streamlit interface.
 
----
+## What It Generates
 
-## 🧠 Overview
+Each run creates a timestamped folder in `reports/` containing:
 
-This project leverages **CrewAI agents + LLMs (Ollama - Llama3)** to simulate a real marketing team:
+- `marketing_report.pdf` - formatted PDF report
+- `report.md` - raw AI-generated report text
+- `report_data.json` - parsed report data and artifact paths
 
-* 📊 Market Analyst → Research & competitor analysis
-* 🎯 Marketing Strategist → Strategy formulation
-* 🚀 Growth Hacker → Growth plan & experiments
-* ✍️ Content Creator → Campaign ideas & copies
+The report is built from the agent output instead of static placeholder text.
 
-The system produces a **complete marketing intelligence report + PDF output**.
+## Agent Workflow
 
----
+The CrewAI pipeline runs these tasks in sequence:
 
-## ✨ Features
+1. Research the company, market, competitors, and opportunities.
+2. Identify the product's target audience and pain points.
+3. Create positioning, messaging, tactics, channels, and KPIs.
+4. Build a 90-day growth plan.
+5. Generate campaign ideas.
+6. Write marketing copy.
+7. Compile the final marketing intelligence report.
 
-* 🔍 Market & competitor analysis
-* 🎯 Target audience understanding
-* 📈 Marketing strategy generation
-* 🚀 90-day growth plan
-* 💡 Campaign idea generation
-* ✍️ Marketing copy creation
-* 📄 Automated PDF report generation
-* ⚡ Multi-agent workflow using CrewAI
+## Setup
 
----
+Copy the example environment file:
 
-## 🏗️ Project Structure
-
-```
-AI-Marketing-Agent/
-│
-├── src/
-│   └── marketing_posts/
-│       ├── crew.py          # Agent + workflow logic
-│       ├── main.py          # Entry point
-│       ├── config/
-│       │   ├── agents.yaml
-│       │   ├── tasks.yaml
-│
-├── README.md
-├── .gitignore
-├── pyproject.toml
-├── .env.example
+```powershell
+Copy-Item .env.example .env
 ```
 
----
+Update `.env` with your Serper API key:
 
-## ⚙️ Tech Stack
-
-* Python
-* CrewAI
-* Ollama (Llama3)
-* Serper API (web search)
-* ReportLab (PDF generation)
-
----
-
-## 🚀 How to Run Locally
-
-### 1. Clone the repo
-
-```
-git clone https://github.com/YOUR_USERNAME/AI-Marketing-Agent.git
-cd AI-Marketing-Agent
+```env
+SERPER_API_KEY=your_serper_key
+OPENAI_API_KEY=ollama
+OPENAI_MODEL_NAME=ollama/llama3.1
+OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
----
+The current default model is local Ollama `llama3.1`, because the research agent needs a model that supports tool calls. Make sure Ollama is running and the model is installed:
 
-### 2. Setup environment
-
-```
-python -m venv venv
-venv\Scripts\activate   # Windows
-```
-
----
-
-### 3. Install dependencies
-
-```
-pip install -r requirements.txt
-```
-
----
-
-### 4. Setup environment variables
-
-Create `.env` file:
-
-```
-SERPER_API_KEY=your_api_key_here
-```
-
----
-
-### 5. Start Ollama
-
-```
+```powershell
+ollama pull llama3.1
 ollama serve
 ```
 
-(Ensure `llama3` model is installed)
+Install dependencies with Poetry:
 
----
-
-### 6. Run the project
-
-```
-python -m marketing_posts.main
+```powershell
+poetry install
 ```
 
----
+Or with uv:
 
-## 📄 Output
-
-The system generates:
-
-* 📊 Marketing strategy report
-* 💡 Campaign ideas
-* ✍️ Ad copies
-* 📈 Growth roadmap
-* 📄 Exported PDF report
-
----
-
-## 🎯 Example Use Case
-
-Input:
-
-```
-Domain: aitool.com  
-Product: AI-powered coding assistant
+```powershell
+uv sync
 ```
 
-Output:
+## Run From Terminal
 
-* Market insights
-* Competitor analysis
-* Growth strategy
-* Campaign ideas
-* Marketing copies
+```powershell
+poetry run marketing_posts
+```
 
----
+You will be prompted for:
 
-## 🔥 Future Improvements
+- company domain
+- product/project description
 
-* 🌐 Web UI (Streamlit / React)
-* 📊 Dashboard for insights
-* 📡 Live data integrations
-* 🧠 Better ranking of campaigns
-* ☁️ Cloud deployment
+When generation finishes, the terminal prints the generated report and the paths to the saved PDF, Markdown, and JSON files.
 
+## Run The Web UI
 
+```powershell
+poetry run streamlit run src/marketing_posts/app.py
+```
+
+The UI lets you enter the same inputs, preview the generated report, and download the output files.
+
+## Main Files
+
+- `src/marketing_posts/main.py` - CLI, validation, artifact generation, PDF builder
+- `src/marketing_posts/app.py` - Streamlit web interface
+- `src/marketing_posts/crew.py` - CrewAI agents and task pipeline
+- `src/marketing_posts/config/agents.yaml` - agent definitions
+- `src/marketing_posts/config/tasks.yaml` - task prompts
+
+## Notes
+
+- The Serper API is used during research.
+- Ollama is used for local LLM calls when `OPENAI_MODEL_NAME` starts with `ollama/`.
+- PDF generation is local and does not call external APIs.

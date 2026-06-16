@@ -1,17 +1,22 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
 from typing import List
 from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, crew, task
 from crewai_tools import SerperDevTool
 from pydantic import BaseModel, Field
 
-# CrewAI native Ollama integration
-llm = LLM(
-    model="ollama/llama3",
-    base_url="http://127.0.0.1:11434"
-)
+
+MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", os.getenv("MODEL_NAME", "ollama/llama3.1"))
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+llm_config = {"model": MODEL_NAME}
+if MODEL_NAME.startswith("ollama/"):
+    llm_config["base_url"] = OLLAMA_BASE_URL
+
+llm = LLM(**llm_config)
 
 # Web search tool
 search_tool = SerperDevTool()
